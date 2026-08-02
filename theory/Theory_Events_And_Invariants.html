@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>06 — Events, Fills & Invariants</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html" class="active">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Normative rules</span></div>
+<h1 id="events-fills-invariants">06 — Events, Fills &amp; Invariants</h1>
+<h2 id="event-sourced-thinking-light">Event-sourced thinking (light)</h2>
+<p>Treat the engine as: <strong>input message → state transition → event list</strong>.</p>
+<p>Callers (CLI, tests, future gateway) should not peek private book guts; they consume events + snapshots.</p>
+<hr />
+<h2 id="event-types-v1">Event types (v1)</h2>
+<table>
+<colgroup>
+<col style="width: 28%" />
+<col style="width: 24%" />
+<col style="width: 48%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Event</th>
+<th>When</th>
+<th>Key fields</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>Accepted</code></td>
+<td>New order passed validation (and may immediately trade)</td>
+<td>order_id, side, type, qty, price</td>
+</tr>
+<tr class="even">
+<td><code>Rejected</code></td>
+<td>Validation / cancel miss / duplicate</td>
+<td>order_id (if any), reason</td>
+</tr>
+<tr class="odd">
+<td><code>Trade</code></td>
+<td>Fill between maker &amp; taker</td>
+<td>maker_id, taker_id, price, qty</td>
+</tr>
+<tr class="even">
+<td><code>Cancelled</code></td>
+<td>User cancel <strong>or</strong> market residual cancel</td>
+<td>order_id, residual_qty, reason</td>
+</tr>
+<tr class="odd">
+<td><code>BookSnapshot</code></td>
+<td>Optional explicit; or CLI-only via API</td>
+<td>levels</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ordering recommendation for one <code>submit</code>:</strong><br />
+<code>Accepted</code> (if new) → zero or more <code>Trade</code> → optional residual <code>Cancelled</code> (market) → (rest is silent except later snapshots).</p>
+<p>Rejects: single <code>Rejected</code>, no trades.</p>
+<p>Some designs emit <code>Accepted</code> only if rested; others always on validation pass. <strong>Lock one:</strong> recommend <strong>Accepted on validation pass before matching</strong>, so partial take+rest still has one accept + trades. Document it.</p>
+<hr />
+<h2 id="trade-event-semantics">Trade event semantics</h2>
+<pre class="text"><code>Trade {
+  maker_id,   // resting
+  taker_id,   // aggressor
+  price,      // maker&#39;s price
+  qty         // &gt; 0
+}</code></pre>
+<p>Multiple trades per submit are normal (walk book / multi-order level).</p>
+<hr />
+<h2 id="reject-reasons-enum">Reject reasons (enum)</h2>
+<p>Keep a small closed set:</p>
+<ul>
+<li><code>DuplicateId</code></li>
+<li><code>InvalidQty</code></li>
+<li><code>UnknownOrderId</code> (cancel)</li>
+<li><code>EmptyBook</code> (optional — usually not a reject for market; just cancel residual)</li>
+</ul>
+<hr />
+<h2 id="invariants-strong">Invariants (strong)</h2>
+<p>Define <code>live</code> = orders with remaining qty in the book.</p>
+<ol type="1">
+<li><strong>Uncrossed:</strong> <code>bids.empty() || asks.empty() || best_bid() &lt; best_ask()</code></li>
+<li><strong>Positive live qty:</strong> every live order has <code>qty &gt; 0</code></li>
+<li><strong>Index bijection:</strong> id in index ↔︎ exactly one book node</li>
+<li><strong>Aggregates:</strong> level total = sum of remainings</li>
+<li><strong>No resting markets</strong></li>
+<li><strong>Conservation on submit(qty Q):</strong><br />
+<code>Q = sum(trade.qty) + rested_qty + cancelled_residual_qty</code></li>
+</ol>
+<p>Debug builds can <code>assert</code> 1–5 after each op. Tests assert 6 on scenarios.</p>
+<hr />
+<h2 id="qty-accounting-examples">Qty accounting examples</h2>
+<h3 id="exact-fill">Exact fill</h3>
+<p><code>NEW sell 10@100</code> against <code>bid 10@100</code> → one trade 10; rested 0; cancelled 0.</p>
+<h3 id="partial-rest">Partial + rest</h3>
+<p><code>NEW sell 4@100</code> against <code>bid 10@100</code> → trade 4; bid rests 6; sell fully filled.</p>
+<h3 id="market-vs-thin">Market vs thin</h3>
+<p>Asks total 30; <code>MARKET buy 100</code> → trades sum 30; cancelled residual 70; rested 0.</p>
+<hr />
+<h2 id="snapshot-vs-event-stream">Snapshot vs event stream</h2>
+<ul>
+<li><strong>Events</strong> narrate <em>what happened</em>.</li>
+<li><strong>Snapshots</strong> narrate <em>what remains</em>.</li>
+</ul>
+<p>Golden tests: either diff event logs, or interleave <code>CHECK_*</code> directives in scenario files. Both are valid; CHECK directives fail fast with clear messages.</p>
+<hr />
+<h2 id="determinism">Determinism</h2>
+<p>Same scenario file → same events (ids, prices, qtys, order of trades).</p>
+<p>Avoid:</p>
+<ul>
+<li>iterating <code>unordered_map</code> for <em>output ordering</em> of trades (trades should follow match order, not hash order)</li>
+<li>timestamps in golden compare strings (print seq numbers; keep clocks out of asserts)</li>
+</ul>
+<hr />
+<h2 id="failure-modes-that-look-like-random-bugs">Failure modes that look like “random bugs”</h2>
+<table>
+<colgroup>
+<col style="width: 36%" />
+<col style="width: 64%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Symptom</th>
+<th>Likely cause</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Crossed book after submit</td>
+<td>Rested before matching / wrong marketability test</td>
+</tr>
+<tr class="even">
+<td>Wrong FIFO</td>
+<td><code>push_front</code> by mistake / sort by id</td>
+</tr>
+<tr class="odd">
+<td>Cancel fails intermittently</td>
+<td>Stale index after fill</td>
+</tr>
+<tr class="even">
+<td>Aggregate ≠ sum</td>
+<td>Forgot to update on partial</td>
+</tr>
+<tr class="odd">
+<td>Double trade</td>
+<td>Didn’t erase empty level; matched ghost</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>Write conservation equation for a partial take+rest limit.</li>
+<li>Should <code>Accepted</code> fire if the order fully fills immediately? (Our recommendation: yes.)</li>
+<li>Why must trade emission order be deterministic?</li>
+<li>List five post-op invariants.</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="Theory_Data_Structures.html">← 05 Data structures</a>
+    <span class="spacer"></span>
+    <a href="Theory_Systems_Cpp.html">07 Systems C++ →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

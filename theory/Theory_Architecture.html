@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Theory — Architecture</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html" class="active">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">This codebase</span></div>
+<h1>Theory — Architecture</h1>
+<p>How the pieces of <strong>this</strong> project fit together: types, book, engine, CLI, and tests.
+Read this after skimming the README; use it while reading the headers under <code>include/</code>.</p>
+
+<h2>Component diagram</h2>
+<pre class="formula">tests/scenarios/*.txt          tests/test_matching.cpp
+         │                              │
+         ▼                              ▼
+   scenario.hpp  ──────────────►  MatchingEngine
+   event_format.hpp                     │
+         ▲                              │ owns
+         │                              ▼
+   src/main.cpp (matcher)          OrderBook
+                                         │
+                                         ▼
+                                   types.hpp
+                              (Order, Event, BookLevel, …)</pre>
+
+<h2>Layers</h2>
+<table>
+  <thead><tr><th>Layer</th><th>Files</th><th>Responsibility</th></tr></thead>
+  <tbody>
+    <tr><td>Types</td><td><code>types.hpp</code></td><td>Enums and POD structs shared by everyone</td></tr>
+    <tr><td>Book</td><td><code>order_book.hpp</code></td><td>Resting liquidity; FIFO queues; id index; take liquidity</td></tr>
+    <tr><td>Engine</td><td><code>matching_engine.hpp</code></td><td>Validate, match, rest/cancel residual, emit events</td></tr>
+    <tr><td>I/O format</td><td><code>event_format.hpp</code></td><td>Serialize events to stable text lines</td></tr>
+    <tr><td>DSL</td><td><code>scenario.hpp</code></td><td>Parse NEW/CANCEL/SNAPSHOT/CHECK_*; drive engine</td></tr>
+    <tr><td>CLI</td><td><code>src/main.cpp</code></td><td><code>matcher [file|-]</code> — file or interactive stdin</td></tr>
+    <tr><td>Tests</td><td><code>tests/test_matching.cpp</code></td><td>G1–G9 in C++ (authoritative harness)</td></tr>
+  </tbody>
+</table>
+<p>All engine code lives under <code>include/</code> + <code>src/main.cpp</code> (no unused utility headers in v1).</p>
+
+<h2>Data structures inside OrderBook</h2>
+<pre class="formula">bids_:  map&lt;price, Level, greater&lt;price&gt;&gt;   // begin() = best bid (highest)
+asks_:  map&lt;price, Level&gt;                   // begin() = best ask (lowest)
+
+Level {
+  total_qty          // sum of remaining qty at this price (kept incremental)
+  deque&lt;Order&gt;       // FIFO: front = oldest = next to match
+}
+
+by_id_: unordered_map&lt;order_id, BookLocation{side, price}&gt;
+        // O(1) locate for cancel; then scan deque at that level</pre>
+
+<p><strong>Why two containers:</strong> <code>map</code> answers “which prices exist, in price order?”;
+<code>deque</code> answers “who arrived first at this price?”
+See also <a href="Theory_Data_Structures.html">Theory_Data_Structures</a>.</p>
+
+<h2>MatchingEngine ↔ OrderBook</h2>
+<ul>
+  <li><code>submit</code> never mutates the book except through <code>OrderBook</code> methods.</li>
+  <li>Match path: peek <code>best_ask_price</code> / <code>best_bid_price</code> → <code>take_best_ask</code> / <code>take_best_bid</code> → emit <code>TradeEvent</code>.</li>
+  <li>Residual <strong>limit</strong> → <code>OrderBook::add</code>.</li>
+  <li>Residual <strong>market</strong> → <code>CancelledEvent(RESIDUAL)</code>; no rest.</li>
+  <li><code>cancel</code> → <code>OrderBook::remove</code> → <code>CancelledEvent(USER)</code> or reject.</li>
+</ul>
+
+<pre class="formula">submit(OrderRequest)
+  │
+  ├─ reject InvalidQty / DuplicateId  → stop
+  ├─ emit Accepted
+  ├─ while marketable: take_best_* → emit Trade
+  └─ if remaining:
+        Limit  → book.add(resting)
+        Market → emit Cancelled(RESIDUAL)</pre>
+
+<h2>Event types (types.hpp)</h2>
+<p><code>Event</code> is a <code>std::variant</code> of:</p>
+<ul>
+  <li><code>AcceptedEvent</code> — order passed validation (before matching)</li>
+  <li><code>TradeEvent</code> — maker_id, taker_id, maker price, qty</li>
+  <li><code>CancelledEvent</code> — USER cancel or MARKET residual</li>
+  <li><code>RejectedEvent</code> — validation / unknown cancel id</li>
+</ul>
+<p>Order for a successful NEW: <code>ACCEPT → TRADE* → optional CANCEL(RESIDUAL)</code>.</p>
+
+<h2>L2 snapshot path</h2>
+<p><code>bids(depth)</code> / <code>asks(depth)</code> walk the maps and return up to <code>depth</code> <code>BookLevel</code> rows
+(<code>price</code>, <code>total_qty</code>, <code>order_count</code>). Used by SNAPSHOT in the DSL and by golden checks.</p>
+
+<h2>Scenario runner path</h2>
+<pre class="formula">run_scenario(istream)          // file or cin
+  optional "> " prompt if interactive
+  for each non-comment line:
+    NEW / CANCEL / SNAPSHOT / CHECK_* / HELP / QUIT
+  return ScenarioResult
+
+run_scenario_file(path) → ifstream → run_scenario(..., interactive=false)</pre>
+
+<h2>Include graph</h2>
+<pre class="formula">types.hpp
+    ▲
+order_book.hpp
+    ▲
+matching_engine.hpp  (implements OrderBook + MatchingEngine inline)
+    ▲
+event_format.hpp
+    ▲
+scenario.hpp
+    ▲
+main.cpp / test_matching.cpp</pre>
+
+<h2>Invariants enforced here</h2>
+<ul>
+  <li>After ops with both sides live: <code>best_bid &lt; best_ask</code> (<code>is_uncrossed</code>)</li>
+  <li>No resting market orders</li>
+  <li>Id index ↔ book nodes stay in sync on add / take / remove</li>
+  <li>Level <code>total_qty</code> tracks deque remainings</li>
+</ul>
+<p>Full rule text: <code>docs/matching_rules.md</code>.</p>
+
+    </article>
+  <nav class="pager">
+    <a href="index.html">← Index</a>
+    <span class="spacer"></span>
+    <a href="Theory_Market_Microstructure.html">Market microstructure →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

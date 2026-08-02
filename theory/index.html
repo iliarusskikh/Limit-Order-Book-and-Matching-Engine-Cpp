@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Theory — Limit Order Book & Matching Engine</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html" class="active">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Start here</span></div>
+
+<h1>Theory — Limit Order Book &amp; Matching Engine</h1>
+<p>Lookup notes for the finished in-memory matching engine in this repository.
+Open these HTML files in a browser. They describe both general CLOB concepts and
+<strong>exactly what this project implements</strong> (see also <code>docs/matching_rules.md</code>).</p>
+
+<h2>Reading order</h2>
+<table>
+  <thead>
+    <tr><th>#</th><th>Note</th><th>Focus</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>0</td><td><a href="Theory_Architecture.html">Architecture</a></td><td>How types, book, engine, CLI, and tests interconnect</td></tr>
+    <tr><td>1</td><td><a href="Theory_Market_Microstructure.html">Market microstructure</a></td><td>Spreads, makers/takers, continuous matching</td></tr>
+    <tr><td>2</td><td><a href="Theory_Order_Types_And_TIF.html">Order types &amp; TIF</a></td><td>Limit vs market; IOC/FOK vocabulary vs v1 cuts</td></tr>
+    <tr><td>3</td><td><a href="Theory_Limit_Order_Book.html">Limit order book</a></td><td>L1/L2/L3, levels, resting vs aggressing</td></tr>
+    <tr><td>4</td><td><a href="Theory_Matching_And_Priority.html">Matching &amp; priority</a></td><td>Price-time, FIFO, maker price, walk-the-book</td></tr>
+    <tr><td>5</td><td><a href="Theory_Data_Structures.html">Data structures</a></td><td><code>map</code>+<code>deque</code>+index, complexity</td></tr>
+    <tr><td>6</td><td><a href="Theory_Events_And_Invariants.html">Events &amp; invariants</a></td><td>Trades, cancels, rejects, uncrossed book</td></tr>
+    <tr><td>7</td><td><a href="Theory_Systems_Cpp.html">Systems C++</a></td><td>Integer prices, clocks, single-thread v1</td></tr>
+    <tr><td>8</td><td><a href="Theory_Testing_And_Correctness.html">Testing</a></td><td>G1–G9, scenario DSL, determinism</td></tr>
+    <tr><td>9</td><td><a href="Theory_Design_Decisions.html">Design decisions</a></td><td>Locked choices and rejected alternatives</td></tr>
+    <tr><td>—</td><td><a href="Theory_Glossary.html">Glossary</a></td><td>Term lookup</td></tr>
+  </tbody>
+</table>
+
+<h2>How to use these notes</h2>
+<ul>
+  <li><strong>With the code:</strong> keep <a href="Theory_Architecture.html">Architecture</a>,
+      <a href="Theory_Matching_And_Priority.html">Matching</a>, and
+      <a href="Theory_Events_And_Invariants.html">Events</a> open.</li>
+  <li><strong>With the README:</strong> <a href="Theory_Design_Decisions.html">Design decisions</a>
+      expands the design table.</li>
+  <li><strong>Later return:</strong> <a href="Theory_Glossary.html">Glossary</a> first, then the topic note.</li>
+</ul>
+
+<h2>Scope of this project</h2>
+<p>Implemented: <strong>one symbol, price-time priority, limit + market, full cancel, L2 snapshots,
+scenario CLI, golden tests G1–G9</strong>. Broader exchange concepts appear so you can see what was
+cut and why — documented in Design decisions and the README scope lock.</p>
+
+    </article>
+  <nav class="pager">
+    <span></span>
+    <span class="spacer"></span>
+    <a href="Theory_Architecture.html">Architecture →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

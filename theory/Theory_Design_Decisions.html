@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Theory — Design Decisions</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html" class="active">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Decisions</span></div>
+<h1>Theory — Design Decisions</h1>
+<p>Locked choices for <strong>this</strong> v1 engine, with the rejected alternatives.
+Mirrors the README design table and comments in <code>matching_engine.hpp</code> / <code>order_book.hpp</code>.</p>
+
+<h2>Book representation</h2>
+<p><strong>Choice:</strong> <code>std::map&lt;price, Level&gt;</code> + <code>std::deque&lt;Order&gt;</code> per level + <code>unordered_map</code> id index.</p>
+<p><strong>Why:</strong> Sorted best bid/ask via <code>begin()</code>; FIFO is natural; easy to reason about and test.</p>
+<p><strong>Rejected for v1:</strong> flat tick array, intrusive linked lists, polymorphic order hierarchy.
+Those are valid upgrades when latency or cancel-in-middle cost dominates.</p>
+
+<h2>Price and quantity</h2>
+<p><strong>Choice:</strong> <code>int64_t</code> ticks and lots. No <code>double</code> on the match path.</p>
+<p><strong>Why:</strong> Exact equality, stable golden tests, matches real tick grids.</p>
+
+<h2>Trade price</h2>
+<p><strong>Choice:</strong> Execute at the <strong>maker (resting)</strong> price.</p>
+<p><strong>Why:</strong> Standing quote defines the trade; aggressor receives price improvement when their limit is through the market.</p>
+<p><strong>Rejected:</strong> mid, microprice, or taker-limit pricing.</p>
+
+<h2>Market residual</h2>
+<p><strong>Choice:</strong> Cancel unfilled market qty (<code>CancelReason::Residual</code>). Never rest a market order.</p>
+<p><strong>Why:</strong> A market order has no price at which to rest. Behaviour matches an IOC-style market.
+Walking successive ask/bid prices still happens until the book is empty.</p>
+<p><strong>Rejected:</strong> convert residual to a limit at last trade (would invent a price policy).</p>
+
+<h2>Order identity</h2>
+<p><strong>Choice:</strong> Caller / scenario supplies <code>order_id</code>; engine rejects duplicates while the id is live.</p>
+<p><strong>Why:</strong> Deterministic scripts without capturing auto-assigned ids.</p>
+<p><strong>Rejected for v1:</strong> engine-only monotonic ids (fine in production gateways; worse for static golden files).</p>
+
+<h2>Event order</h2>
+<p><strong>Choice:</strong> On successful NEW: <code>Accepted</code> → zero or more <code>Trade</code> → optional residual <code>Cancelled</code>.</p>
+<p><strong>Why:</strong> Stable CLI output; Accepted means “validated,” not “rested.”</p>
+
+<h2>Amend / TIF / STP</h2>
+<p><strong>Choice:</strong> Out of scope. Amend = cancel + new. Market residual ≈ IOC market. Self-trades allowed.</p>
+<p><strong>Why:</strong> Keeps one-day correctness focus; further types live under future work in the README.</p>
+
+<h2>Concurrency</h2>
+<p><strong>Choice:</strong> Single-threaded book.</p>
+<p><strong>Why:</strong> Matching rules first. Production pattern later: shard by symbol onto dedicated threads.</p>
+
+<h2>Testing approach</h2>
+<p><strong>Choice:</strong> Hand-rolled G1–G9 in C++ plus scenario DSL twins; zero third-party test frameworks.</p>
+<p><strong>Why:</strong> Clear portfolio signal; no Catch2/GTest dependency noise.</p>
+
+<h2>Companion MDS project</h2>
+<p>A separate TCP market-data simulator covers wire/session/feed.
+This repo stops at in-memory match state. Future glue (not v1): gateway → matcher → publish trades/book.</p>
+
+<h2>Worked behaviours (same facts as the golden tests)</h2>
+<ul>
+  <li><strong>Price-time:</strong> better price first; FIFO within a price (G4, G5).</li>
+  <li><strong>Cross prevention:</strong> marketable limits match before resting; book stays uncrossed (G8).</li>
+  <li><strong>Partial fill:</strong> maker qty shrinks; taker may fully fill without resting (G3).</li>
+  <li><strong>Thin market:</strong> market buy takes all asks then cancels leftover (G7).</li>
+  <li><strong>Rejects:</strong> bad qty / duplicate id leave the book unchanged (G9).</li>
+</ul>
+
+    </article>
+  <nav class="pager">
+    <a href="Theory_Testing_And_Correctness.html">← Testing</a>
+    <span class="spacer"></span>
+    <a href="Theory_Glossary.html">Glossary →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

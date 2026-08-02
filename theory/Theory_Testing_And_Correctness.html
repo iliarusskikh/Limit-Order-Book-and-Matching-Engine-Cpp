@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>08 — Testing & Correctness</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html" class="active">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Correctness</span></div>
+<h1 id="testing-correctness">08 — Testing &amp; Correctness</h1>
+<h2 id="why-golden-tests-beat-it-printed-something">Why golden tests beat “it printed something”</h2>
+<p>A matching engine is a <strong>pure-ish state machine</strong>. The portfolio bar is:</p>
+<blockquote>
+<p>Same scripted inputs → bit-stable outputs (events + book checks).</p>
+</blockquote>
+<p>That is how exchange QA and prop-shop desk tools think.</p>
+<hr />
+<h2 id="test-pyramid-for-this-repo">Test pyramid for this repo</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Layer</th>
+<th>What</th>
+<th>Mandatory?</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Unit-ish</td>
+<td>Insert/cancel/snapshot without full CLI</td>
+<td>Yes (Phase 1)</td>
+</tr>
+<tr class="even">
+<td>Golden scenarios G1–G9</td>
+<td>File or embedded DSL</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr class="odd">
+<td>Invariant asserts</td>
+<td>After each op in Debug / test hook</td>
+<td>Strongly recommended</td>
+</tr>
+<tr class="even">
+<td>Microbench</td>
+<td>submit latency</td>
+<td>Optional polish</td>
+</tr>
+<tr class="odd">
+<td>Fuzz / random orders</td>
+<td>RNG sequences + invariant oracle</td>
+<td>Stretch / later</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="scenario-dsl">Scenario DSL</h2>
+<pre class="text"><code>NEW &lt;id&gt; &lt;BUY|SELL&gt; &lt;LIMIT|MARKET&gt; &lt;qty&gt; &lt;price&gt;
+CANCEL &lt;id&gt;
+SNAPSHOT &lt;depth&gt;
+CHECK_BEST_BID &lt;price&gt; &lt;qty&gt;
+CHECK_BEST_ASK &lt;price&gt; &lt;qty&gt;
+CHECK_TRADE_COUNT &lt;n&gt;
+# optional richer checks as you grow:
+# CHECK_LEVEL BID &lt;price&gt; &lt;qty&gt; &lt;count&gt;
+# CHECK_NO_CROSS</code></pre>
+<p><strong>Fail soft vs fail hard:</strong> test runner should abort scenario on first CHECK failure with line number.</p>
+<hr />
+<h2 id="mandatory-behaviours-map-to-g1g9">Mandatory behaviours (map to G1–G9)</h2>
+<table>
+<thead>
+<tr class="header">
+<th>ID</th>
+<th>Tests the rule in note</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>G1</td>
+<td>Rest when not marketable (04, 02)</td>
+</tr>
+<tr class="even">
+<td>G2</td>
+<td>Exact fill + maker price</td>
+</tr>
+<tr class="odd">
+<td>G3</td>
+<td>Partial + residual rest</td>
+</tr>
+<tr class="even">
+<td>G4</td>
+<td>Walk multiple levels</td>
+</tr>
+<tr class="odd">
+<td>G5</td>
+<td>FIFO same price</td>
+</tr>
+<tr class="even">
+<td>G6</td>
+<td>Cancel + unknown reject</td>
+</tr>
+<tr class="odd">
+<td>G7</td>
+<td>Market residual cancel policy</td>
+</tr>
+<tr class="even">
+<td>G8</td>
+<td>Uncrossed invariant</td>
+</tr>
+<tr class="odd">
+<td>G9</td>
+<td>Validation rejects leave book untouched</td>
+</tr>
+</tbody>
+</table>
+<p>If time permits, add <strong>G4b</strong>: limit buy that sweeps two levels then rests residual between new BBO.</p>
+<hr />
+<h2 id="property-invariant-testing">Property / invariant testing</h2>
+<p>Even without a fuzzer, after each command in the test harness:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ot">assert</span><span class="op">(!</span>crossed<span class="op">(</span>book<span class="op">));</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ot">assert</span><span class="op">(</span>aggregates_consistent<span class="op">(</span>book<span class="op">));</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ot">assert</span><span class="op">(</span>index_consistent<span class="op">(</span>book<span class="op">));</span></span></code></pre></div>
+<p>This catches bugs golden scripts miss.</p>
+<hr />
+<h2 id="deterministic-output-format">Deterministic output format</h2>
+<p>Lock an event serialization for diffs, e.g.:</p>
+<pre class="text"><code>ACCEPT id=1 side=BUY type=LIMIT qty=10 price=100
+TRADE maker=2 taker=1 price=101 qty=4
+CANCEL id=1 qty=0 reason=USER
+REJECT id=9 reason=UnknownOrderId</code></pre>
+<p>Stable field order; no timestamps in compared lines.</p>
+<hr />
+<h2 id="oracles">Oracles</h2>
+<p>Two useful oracles:</p>
+<ol type="1">
+<li><strong>Hand-computed expected trades</strong> for small scripts (primary).</li>
+<li><strong>Conservation + uncrossed</strong> as automatic checks (secondary safety net).</li>
+</ol>
+<p>A third later: slow reference engine (<code>multiset</code> of orders) vs fast engine — differential testing.</p>
+<hr />
+<h2 id="what-not-to-test-in-v1">What not to test in v1</h2>
+<ul>
+<li>Throughput under multi-thread contention</li>
+<li>Network partial reads</li>
+<li>Persistence / crash recovery</li>
+<li>Fee calculations</li>
+</ul>
+<hr />
+<h2 id="harness-choice">Harness choice</h2>
+<p><strong>Zero deps:</strong> custom <code>CHECK</code> macros / <code>main</code> that returns non-zero — preferred for portfolio clarity.</p>
+<p>Catch2/GoogleTest: fine if you already know them; not worth adding for one day unless you move faster with them.</p>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>Why are timestamps harmful in golden diffs?</li>
+<li>What does G5 protect against?</li>
+<li>Name two invariants to assert after every command.</li>
+<li>How do you prove a reject left the book unchanged?</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="Theory_Systems_Cpp.html">← 07 Systems C++</a>
+    <span class="spacer"></span>
+    <a href="Theory_Design_Decisions.html">Design decisions →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

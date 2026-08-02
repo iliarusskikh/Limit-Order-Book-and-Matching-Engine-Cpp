@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>04 — Matching Rules & Priority</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html" class="active">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Normative rules</span></div>
+<h1 id="matching-rules-priority">04 — Matching Rules &amp; Priority</h1>
+<p>This note is <strong>normative for our engine</strong> — implement exactly this, then document in <code>docs/matching_rules.md</code>.</p>
+<hr />
+<h2 id="price-time-priority-fifo">Price-time priority (FIFO)</h2>
+<p>When allocating a trade against resting liquidity:</p>
+<ol type="1">
+<li><strong>Price priority:</strong> always consume the <strong>best</strong> opposite price first
+<ul>
+<li>Aggressive buy → lowest ask first, then next lowest, …<br />
+</li>
+<li>Aggressive sell → highest bid first, then next, …</li>
+</ul></li>
+<li><strong>Time priority:</strong> within a price, consume orders in <strong>arrival order</strong> (FIFO queue).</li>
+</ol>
+<p>No pro-rata, no size priority, no broker preferencing in v1.</p>
+<h3 id="contrast-pro-rata-futures-intuition">Contrast: pro-rata (futures intuition)</h3>
+<p>At the same price, allocate fills <strong>proportional to displayed size</strong> (with caps/min lots). Different fairness story; different data structures. Say in review: “Equities-style CLOB is price-time; some futures books are pro-rata or hybrid.”</p>
+<hr />
+<h2 id="match-loop-aggressive-buy-vs-asks">Match loop (aggressive buy vs asks)</h2>
+<p>Pseudocode:</p>
+<pre class="text"><code>function match_buy(taker):
+  while taker.remaining &gt; 0 and asks not empty:
+    best_price, queue = asks.best()
+    if taker.is_limit and best_price &gt; taker.limit_price:
+      break   # not willing to pay this much
+    // market: never break on price
+    while taker.remaining &gt; 0 and queue not empty:
+      maker = queue.front()
+      q = min(taker.remaining, maker.remaining)
+      emit Trade(maker.id, taker.id, price=maker.price, qty=q)
+      maker.remaining -= q
+      taker.remaining -= q
+      if maker.remaining == 0:
+        queue.pop_front()
+        forget(maker.id)
+    if queue empty:
+      asks.erase(best_price)
+  if taker.is_limit and taker.remaining &gt; 0:
+    rest(taker)
+  else if taker.is_market and taker.remaining &gt; 0:
+    emit Cancelled(taker, residual)</code></pre>
+<p>Sell vs bids is symmetric (<code>best_price &lt; taker.limit_price</code> breaks for sell limits).</p>
+<hr />
+<h2 id="trade-price-convention-maker-resting-price">Trade price convention: <strong>maker (resting) price</strong></h2>
+<p>Each fill executes at the <strong>resting order’s price</strong>, not the aggressor’s limit.</p>
+<p>Example:</p>
+<ul>
+<li>Ask rests <code>10 @ 101</code>.</li>
+<li>Buy limit <code>10 @ 105</code> arrives.</li>
+<li>Trade price = <strong>101</strong> (maker), not 105.</li>
+</ul>
+<p>Why venues do this: the resting quote was the standing offer; price improvement goes to the taker. Document in README — this is a core rule of the project.</p>
+<p><strong>Not used in v1:</strong> mid, microprice, taker limit, or discretionary price.</p>
+<hr />
+<h2 id="walk-the-book">Walk the book</h2>
+<p>Large aggressor, multiple levels:</p>
+<pre class="text"><code>Asks: 10@101, 10@102, 10@103
+Market buy 25
+
+Trades:
+  10 @ 101
+  10 @ 102
+   5 @ 103
+Residual market: 0 (fully filled)</code></pre>
+<p>Average fill = (10·101 + 10·102 + 5·103) / 25 — useful demo narrative for “impact.”</p>
+<hr />
+<h2 id="partial-fills">Partial fills</h2>
+<p>Any trade with <code>q &lt; remaining_before</code> on either side is a partial for that side.</p>
+<p>Accounting identity after each <code>submit</code>:</p>
+<pre class="formula">incoming qty = sum(trade qtys) + resting residual + cancelled residual</pre>
+<p>Golden tests should be able to verify this.</p>
+<hr />
+<h2 id="cancel-semantics">Cancel semantics</h2>
+<ul>
+<li>Remove remaining qty of resting order; adjust level aggregate; drop empty levels.</li>
+<li>Already filled / unknown → reject.</li>
+<li>Cancel does not trigger matching (except exotic venues) — book may only widen/thin.</li>
+</ul>
+<hr />
+<h2 id="order-identity-model-locked-for-this-repo">Order identity model (locked for this repo)</h2>
+<ul>
+<li>Scenario supplies <code>order_id</code>.</li>
+<li>Engine <strong>rejects duplicates</strong>.</li>
+<li>Cancel and trades refer to those ids.</li>
+<li>Deterministic tests without capturing auto-ids.</li>
+</ul>
+<p>Alternative (engine-assigned ids) is fine in production gateways; worse for scripted golden files unless the DSL supports bind variables.</p>
+<hr />
+<h2 id="sequence-time">Sequence / time</h2>
+<p>FIFO is defined by <strong>order of acceptance onto that price level</strong>, not wall-clock.</p>
+<p>Implementation: <code>std::deque</code> push_back on rest; pop_front on fill. Optional explicit <code>seq</code> monotonic counter for debugging equality.</p>
+<p>Wall-clock timestamps on events are <strong>cosmetic</strong> for logs; matching must not depend on <code>system_clock</code>.</p>
+<hr />
+<h2 id="invariants-assert-in-debug-tests">Invariants (assert in debug / tests)</h2>
+<p>After every successful mutating API call:</p>
+<ol type="1">
+<li>If bids and asks both non-empty: <code>best_bid &lt; best_ask</code>.</li>
+<li>All remaining qtys <code>&gt; 0</code> for live orders.</li>
+<li>Every live id appears in exactly one queue position + index.</li>
+<li>Level aggregate qty equals sum of order remainings at that price.</li>
+<li>No market orders rest on the book.</li>
+</ol>
+<hr />
+<h2 id="edge-cases-checklist">Edge cases checklist</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Case</th>
+<th>Expected</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Exact qty match at one level</td>
+<td>One trade; both gone; level may disappear</td>
+</tr>
+<tr class="even">
+<td>Aggressor larger than top level</td>
+<td>Multiple trades; walk</td>
+</tr>
+<tr class="odd">
+<td>Limit exactly at best opposite</td>
+<td>Marketable; trades</td>
+</tr>
+<tr class="even">
+<td>Buy limit = best bid (no ask cross)</td>
+<td>Rests; joins bid queue FIFO</td>
+</tr>
+<tr class="odd">
+<td>Empty opposite book + market</td>
+<td>No trades; residual cancelled</td>
+</tr>
+<tr class="even">
+<td>Empty opposite + limit</td>
+<td>Rests</td>
+</tr>
+<tr class="odd">
+<td>Duplicate new id</td>
+<td>Reject; no state change</td>
+</tr>
+<tr class="even">
+<td>Cancel twice</td>
+<td>Second reject</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>Write the match loop for an aggressive sell.</li>
+<li>Why is trade price 101 when taker limit is 105?</li>
+<li>Prove by invariant that a correct match leaves the book uncrossed.</li>
+<li>How does FIFO differ from pro-rata at one price level?</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="Theory_Limit_Order_Book.html">← 03 Limit order book</a>
+    <span class="spacer"></span>
+    <a href="Theory_Data_Structures.html">05 Data structures →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

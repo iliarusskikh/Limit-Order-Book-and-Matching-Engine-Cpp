@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>07 — Systems C++ for Matching Engines</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html" class="active">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Systems</span></div>
+<h1 id="systems-c-for-matching-engines">07 — Systems C++ for Matching Engines</h1>
+<h2 id="language-standard">Language standard</h2>
+<p><strong>Recommendation for this portfolio:</strong> <strong>C++17</strong>.</p>
+<p>Reasons:</p>
+<ul>
+<li><code>enum class</code>, structured bindings, <code>std::optional</code> for BBO, <code>string_view</code> for scenario parsing.</li>
+<li>Still widely expected in quant shop codebases.</li>
+<li>This project locks <strong>C++17</strong> in CMake (<code>CXX_STANDARD 17</code>) and does not mix standards.</li>
+</ul>
+<hr />
+<h2 id="hot-path-rules-of-thumb">Hot path rules of thumb</h2>
+<p>Match path should avoid:</p>
+<ol type="1">
+<li><strong><code>double</code> / <code>float</code> prices</strong> — use <code>int64_t</code> ticks.</li>
+<li><strong>Heap allocs per trade event if avoidable</strong> — <code>vector&lt;Event&gt;</code> reuse via <code>clear()</code> + <code>reserve</code>, or output iterator. v1 may allocate; know it’s a next knob.</li>
+<li><strong>Virtual calls / deep inheritance</strong> for order kinds — use <code>enum class</code> + switch.</li>
+<li><strong>Exceptions for normal rejects</strong> — return <code>Rejected</code> events; exceptions for truly exceptional I/O only.</li>
+<li><strong>Logging in the inner loop</strong> at Info level — gate or keep out of match.</li>
+</ol>
+<hr />
+<h2 id="types-that-read-well-in-review">Types that read well in review</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">enum</span> <span class="kw">class</span> Side <span class="op">:</span> <span class="dt">uint8_t</span> <span class="op">{</span> Buy<span class="op">,</span> Sell <span class="op">};</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">enum</span> <span class="kw">class</span> OrderType <span class="op">:</span> <span class="dt">uint8_t</span> <span class="op">{</span> Limit<span class="op">,</span> Market <span class="op">};</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">enum</span> <span class="kw">class</span> EventType <span class="op">:</span> <span class="dt">uint8_t</span> <span class="op">{</span> Accepted<span class="op">,</span> Rejected<span class="op">,</span> Trade<span class="op">,</span> Cancelled <span class="op">};</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> OrderRequest <span class="op">{</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">uint64_t</span> order_id<span class="op">;</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>  Side side<span class="op">;</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>  OrderType type<span class="op">;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">int64_t</span> price<span class="op">;</span>  <span class="co">// ticks; ignored for Market</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">int64_t</span> qty<span class="op">;</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span></code></pre></div>
+<p>Prefer <strong>strong enums</strong> over bool <code>is_buy</code> and stringly-typed APIs.</p>
+<hr />
+<h2 id="clocks">Clocks</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Clock</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>steady_clock</code></td>
+<td>Latency histograms around <code>submit</code></td>
+</tr>
+<tr class="even">
+<td><code>system_clock</code></td>
+<td>Human log timestamps only</td>
+</tr>
+<tr class="odd">
+<td>Sequence integer</td>
+<td>Matching causality / FIFO debug</td>
+</tr>
+</tbody>
+</table>
+<p>Never use wall time for priority.</p>
+<p>v1 ships without a separate logger or scope-timer header — CLI prints event lines only.</p>
+<hr />
+<h2 id="api-surface-const-correctness">API surface (const correctness)</h2>
+<div class="sourceCode" id="cb2"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> MatchingEngine <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span><span class="op">:</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="bu">std::</span>vector<span class="op">&lt;</span>Event<span class="op">&gt;</span> submit<span class="op">(</span><span class="at">const</span> OrderRequest<span class="op">&amp;);</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="bu">std::</span>vector<span class="op">&lt;</span>Event<span class="op">&gt;</span> cancel<span class="op">(</span><span class="dt">uint64_t</span> order_id<span class="op">);</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="bu">std::</span>vector<span class="op">&lt;</span>BookLevel<span class="op">&gt;</span> bids<span class="op">(</span><span class="bu">std::</span>size_t<span class="op"> </span>depth<span class="op">)</span> <span class="at">const</span><span class="op">;</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  <span class="bu">std::</span>vector<span class="op">&lt;</span>BookLevel<span class="op">&gt;</span> asks<span class="op">(</span><span class="bu">std::</span>size_t<span class="op"> </span>depth<span class="op">)</span> <span class="at">const</span><span class="op">;</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  <span class="co">// optional:</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  <span class="bu">std::</span>optional<span class="op">&lt;</span>BookLevel<span class="op">&gt;</span> best_bid<span class="op">()</span> <span class="at">const</span><span class="op">;</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>  <span class="bu">std::</span>optional<span class="op">&lt;</span>BookLevel<span class="op">&gt;</span> best_ask<span class="op">()</span> <span class="at">const</span><span class="op">;</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span></code></pre></div>
+<p>All mutation through <code>submit</code> / <code>cancel</code>. Snapshots are <code>const</code>.</p>
+<hr />
+<h2 id="header-vs-tu-split">Header vs TU split</h2>
+<p>For a one-day project: <strong>headers for types + book + engine</strong>, thin <code>main.cpp</code> and <code>test_*.cpp</code> is fine.</p>
+<p>Split <code>.cpp</code> only if compile times hurt or you want clearer linker boundaries. Avoid header-only chaos with heavy STL in many TUs if you later grow — not a day-1 problem.</p>
+<hr />
+<h2 id="build">Build</h2>
+<ul>
+<li>CMake ≥ 3.16-ish: two targets <code>matcher</code>, <code>lob_tests</code>.</li>
+<li><code>-Wall -Wextra -Wpedantic</code>; Debug + Release configs.</li>
+<li>Sanitizers as optional local habit: <code>-fsanitize=address,undefined</code> in Debug (document in README; don’t require CI day one).</li>
+</ul>
+<hr />
+<h2 id="latency-measurement-secondary-polish">Latency measurement (secondary polish)</h2>
+<p>If ahead of schedule:</p>
+<pre class="text"><code>For i in 1..N:
+  t0 = steady_clock::now()
+  engine.submit(...)
+  record(now - t0)
+Report p50 / p95 / p99 in ns or µs</code></pre>
+<p>Caveats to say aloud: microbench without CPU pinning, warm-up, or fixed scenario is <strong>indicative only</strong>. Still shows engineering taste.</p>
+<hr />
+<h2 id="what-hft-matching-adds-vocabulary">What “HFT matching” adds (vocabulary)</h2>
+<ul>
+<li>Core affinity, kernel bypass networking (not matching itself)</li>
+<li>Custom allocators / arena for orders</li>
+<li>Contiguous price levels, cached BBO pointers</li>
+<li>Avoiding shared atomics on the book; shard by symbol</li>
+<li>Deterministic replay from journal for incident response</li>
+</ul>
+<p>Your project stops at <strong>correct single-threaded CLOB</strong> — then <em>talks</em> about the ladder above.</p>
+<hr />
+<h2 id="anti-patterns-to-avoid-in-this-repo">Anti-patterns to avoid in this repo</h2>
+<ul>
+<li>Singleton <code>Exchange::instance()</code></li>
+<li><code>new Order</code> polymorphism tree</li>
+<li>Mixing sockets into v1</li>
+<li>Premature template metaprogramming for Side</li>
+<li>Assert-only “tests” with no golden scenarios</li>
+</ul>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>Why <code>steady_clock</code> for latency and not <code>system_clock</code>?</li>
+<li>Why prefer events over exceptions for rejects?</li>
+<li>What CMake standard will this repo lock?</li>
+<li>Name two hot-path upgrades after map+deque is correct.</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="Theory_Events_And_Invariants.html">← 06 Events & invariants</a>
+    <span class="spacer"></span>
+    <a href="Theory_Testing_And_Correctness.html">08 Testing →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

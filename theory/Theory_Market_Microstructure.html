@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>01 — Market Microstructure Essentials</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html" class="active">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Foundations</span></div>
+<h1 id="market-microstructure-essentials">01 — Market Microstructure Essentials</h1>
+<h2 id="what-problem-does-a-matching-engine-solve">What problem does a matching engine solve?</h2>
+<p>A <strong>market</strong> needs a mechanism that turns intent (“I want to buy 100 @ 101”) into <strong>trades</strong> when two parties’ intents are compatible, and otherwise <strong>queues</strong> intent where others can see it (liquidity).</p>
+<p>Two classical designs:</p>
+<table style="width:100%;">
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 51%" />
+<col style="width: 28%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Design</th>
+<th>How price is found</th>
+<th>Book role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Call / batch auction</strong></td>
+<td>Periodic clearing price</td>
+<td>Orders accumulate; match at discrete times</td>
+</tr>
+<tr class="even">
+<td><strong>Continuous limit order book (CLOB)</strong></td>
+<td>Continuous bilateral matching</td>
+<td>Resting orders form a live price schedule</td>
+</tr>
+</tbody>
+</table>
+<p>This project implements a <strong>single-instrument continuous CLOB</strong> — the workhorse of equities, futures, and most crypto spot venues.</p>
+<hr />
+<h2 id="agents-and-roles">Agents and roles</h2>
+<ul>
+<li><strong>Liquidity provider (maker):</strong> posts resting limit orders that sit on the book. Earns the <strong>spread</strong> when hit (in fee models: maker rebate). Provides depth.</li>
+<li><strong>Liquidity taker (aggressor):</strong> submits an order that immediately crosses the spread and trades. Pays the spread (taker fee on many venues).</li>
+<li>Same participant can be maker on one order and taker on another.</li>
+</ul>
+<p>Note: <em>“Matching is not pricing theory — it is a deterministic state machine that allocates trades under published priority rules.”</em></p>
+<hr />
+<h2 id="the-bidask-spread">The bid–ask spread</h2>
+<p>At any moment (both sides non-empty):</p>
+<pre class="formula">best bid  = max{ buy prices on book }
+best ask  = min{ sell prices on book }
+spread    = best ask − best bid</pre>
+<p><strong>Invariant (continuous book after each message):</strong> if both sides have liquidity, <code>best bid &lt; best ask</code> (or <code>≤</code> only if the venue allows locked markets — <strong>we forbid crossed and locked</strong>: require <code>best_bid &lt; best_ask</code>).</p>
+<ul>
+<li><strong>Crossed book</strong> (<code>bid ≥ ask</code>): bug or incomplete match — never leave the book this way after an operation.</li>
+<li><strong>Locked book</strong> (<code>bid == ask</code>): some venues allow; many equity markets do not. Our v1: treat equality as invalid post-state (matching should have traded through).</li>
+</ul>
+<p><strong>Midprice</strong> (reference only; not used for trade pricing here):</p>
+<pre class="formula">mid = (best bid + best ask) / 2</pre>
+<hr />
+<h2 id="price-discovery-vs-matching">Price discovery vs matching</h2>
+<ul>
+<li><strong>Matching</strong> allocates quantity between orders under rules (priority, self-trade policy, TIF).</li>
+<li><strong>Price discovery</strong> is the economic process by which the book’s resting prices reflect information.</li>
+</ul>
+<p>Your engine <em>implements</em> matching. It does not invent a “fair value.” Trade prices emerge from <strong>who rested at what price</strong> (maker convention — see note 04).</p>
+<hr />
+<h2 id="depth-and-impact-intuition">Depth and impact (intuition)</h2>
+<ul>
+<li><strong>Top of book (L1):</strong> best bid/ask price and size — what a market order hits first.</li>
+<li><strong>Depth (L2):</strong> several price levels of aggregate size — what a large sweep walks through.</li>
+<li><strong>Market impact:</strong> large aggressive orders consume multiple levels → average fill price worsens vs mid. Your “walk the book” tests encode this mechanically.</li>
+</ul>
+<p>For portfolio storytelling: show a scenario where a market buy of 100 against thin asks fills at several ascending prices — that <em>is</em> impact, demonstrated in code.</p>
+<hr />
+<h2 id="continuous-matching-cycle-mental-model">Continuous matching cycle (mental model)</h2>
+<p>For each inbound message (new / cancel / …):</p>
+<ol type="1">
+<li><strong>Validate</strong> (qty, id uniqueness, side/type consistency).</li>
+<li><strong>Match</strong> if the order is marketable against the opposite side.</li>
+<li><strong>Rest</strong> any remaining limit quantity on its side (market residual: policy-dependent — we cancel).</li>
+<li><strong>Emit events</strong> (accept, trades, cancel residual, reject).</li>
+<li><strong>Assert invariants</strong> (no crossed book; qty accounting).</li>
+</ol>
+<p>This is exactly <code>MatchingEngine::submit</code> / <code>cancel</code> in the plan.</p>
+<hr />
+<h2 id="tick-size-and-lot-size">Tick size and lot size</h2>
+<p>Real venues constrain:</p>
+<ul>
+<li><strong>Tick size:</strong> minimum price increment (e.g. $0.01).</li>
+<li><strong>Lot size:</strong> minimum quantity increment (e.g. 1 share, or 100).</li>
+</ul>
+<p>Representation choice for systems work:</p>
+<ul>
+<li>Store <strong>price as integer ticks</strong>, qty as integer lots.</li>
+<li>Never use <code>double</code> on the match path (rounding bugs, non-associativity, hard golden tests).</li>
+</ul>
+<p>Example: tick = 0.01 → display price <code>100.25</code> ↔︎ integer <code>10025</code>.</p>
+<p>v1: document a tick label; optional validation that price % tick == 0 can wait if timeboxed.</p>
+<hr />
+<h2 id="why-portfolio-projects-implement-clobs">Why portfolio projects implement CLOBs</h2>
+<p>These notes emphasize:</p>
+<ol type="1">
+<li>Can you encode rules as invariants + tests?</li>
+<li>Do you choose boring correct structures first?</li>
+<li>Do you know what “price-time priority” <em>means</em> under partial fills?</li>
+<li>Can you explain maker/taker and trade price without hand-waving?</li>
+</ol>
+<p>Your MDS companion shows I/O; this project shows <strong>market rules + C++ judgment</strong>.</p>
+<hr />
+<h2 id="what-we-deliberately-omit-and-the-real-world-name">What we deliberately omit (and the real-world name)</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Omitted</th>
+<th>Real-world concept</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Multiple symbols</td>
+<td>Matching engine sharded by instrument</td>
+</tr>
+<tr class="even">
+<td>Networking</td>
+<td>Order gateway / OUCH / FIX / binary OE</td>
+</tr>
+<tr class="odd">
+<td>Fees</td>
+<td>Fee schedule alters effective priority sometimes</td>
+</tr>
+<tr class="even">
+<td>Auctions</td>
+<td>Opening/closing cross, halt re-open</td>
+</tr>
+<tr class="odd">
+<td>Hidden liquidity</td>
+<td>Reserve / iceberg / dark</td>
+</tr>
+<tr class="even">
+<td>Pro-rata matching</td>
+<td>Futures allocations (e.g. some CME products)</td>
+</tr>
+<tr class="odd">
+<td>Self-trade prevention</td>
+<td>STP modes (cancel newest, cancel oldest, …)</td>
+</tr>
+</tbody>
+</table>
+<p>Know the names; do not implement them in v1.</p>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>Define spread, locked, and crossed.</li>
+<li>Who is maker vs taker on a trade where a buy limit hits a resting sell?</li>
+<li>Why integer ticks instead of <code>double</code>?</li>
+<li>What does one <code>submit</code> call do end-to-end?</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="index.html">← Index</a>
+    <span class="spacer"></span>
+    <a href="Theory_Order_Types_And_TIF.html">02 Order types & TIF →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

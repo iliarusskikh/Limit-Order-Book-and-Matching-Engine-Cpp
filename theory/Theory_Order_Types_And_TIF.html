@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>02 — Order Types & Time-in-Force</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html" class="active">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Orders</span></div>
+<h1 id="order-types-time-in-force">02 — Order Types &amp; Time-in-Force</h1>
+<h2 id="orders-as-messages">Orders as messages</h2>
+<p>An order is a <strong>request to change book state</strong>, not a trade. Trades are <em>outputs</em> of matching.</p>
+<p>Minimum fields (conceptual):</p>
+<table>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Identity</td>
+<td><code>order_id</code> (unique while live)</td>
+</tr>
+<tr class="even">
+<td>Side</td>
+<td>Buy / Sell</td>
+</tr>
+<tr class="odd">
+<td>Type</td>
+<td>Limit / Market (v1)</td>
+</tr>
+<tr class="even">
+<td>Quantity</td>
+<td>Remaining qty mutates on fills</td>
+</tr>
+<tr class="odd">
+<td>Price</td>
+<td>Limit price; meaningless for pure market</td>
+</tr>
+<tr class="even">
+<td>Arrival</td>
+<td>Time or sequence for FIFO</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="limit-orders">Limit orders</h2>
+<p><strong>Definition:</strong> buy (sell) only at price <strong>≤ (≥)</strong> the limit, or better.</p>
+<p>Behaviour:</p>
+<ol type="1">
+<li>If <strong>not marketable</strong> (buy limit <code>&lt;</code> best ask, or no asks): <strong>rest</strong> on the book at that price.</li>
+<li>If <strong>marketable</strong> (buy limit <code>≥</code> best ask): <strong>aggress</strong> — match immediately against opposite side, walking prices as needed, until qty done or no more eligible liquidity.</li>
+<li>Any <strong>unfilled remainder</strong> of a limit <strong>rests</strong> at the limit price (unless TIF says otherwise).</li>
+</ol>
+<p>“Better” for a buy means lower ask prices first; for a sell, higher bid prices first.</p>
+<h3 id="marketability-test-limit">Marketability test (limit)</h3>
+<pre class="text"><code>Buy  limit is marketable iff asks non-empty AND limit_price &gt;= best_ask
+Sell limit is marketable iff bids non-empty AND limit_price &lt;= best_bid</code></pre>
+<hr />
+<h2 id="market-orders">Market orders</h2>
+<p><strong>Definition:</strong> take liquidity now at whatever prices the book offers; no resting price.</p>
+<p>Behaviour in our v1 (document this; venues differ):</p>
+<ol type="1">
+<li>Match against opposite side from best price outward.</li>
+<li>If book runs out before qty filled → <strong>cancel residual</strong> (do not leave a naked market order on the book).</li>
+<li>Emit an explicit residual-cancelled (or equivalent) event so tests can assert accounting.</li>
+</ol>
+<p>Alternative policies you might hear:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Policy</th>
+<th>Meaning</th>
+<th>Our v1</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Cancel residual</td>
+<td>Unfilled die</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr class="even">
+<td>Convert to limit at last trade / peg</td>
+<td>Rest remainder</td>
+<td>No</td>
+</tr>
+<tr class="odd">
+<td>Reject if cannot fully fill</td>
+<td>FOK-like</td>
+<td>No (that’s FOK)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="time-in-force-tif-know-the-dictionary">Time-in-force (TIF) — know the dictionary</h2>
+<p>We do <strong>not</strong> implement named TIFs in v1, but Useful vocabulary beyond v1:</p>
+<table>
+<colgroup>
+<col style="width: 31%" />
+<col style="width: 68%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>TIF</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>DAY / GTC</strong></td>
+<td>Rest until filled, cancelled, or session end (GTC across sessions)</td>
+</tr>
+<tr class="even">
+<td><strong>IOC</strong> (Immediate-or-Cancel)</td>
+<td>Match now; cancel any unfilled remainder — <strong>never rest</strong></td>
+</tr>
+<tr class="odd">
+<td><strong>FOK</strong> (Fill-or-Kill)</td>
+<td>Fill entire qty now or reject with <strong>no partials</strong></td>
+</tr>
+<tr class="even">
+<td><strong>GTD</strong></td>
+<td>Good till date/time</td>
+</tr>
+<tr class="odd">
+<td><strong>ATO / ATC</strong></td>
+<td>Auction-only (open/close)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Mapping to v1:</strong></p>
+<ul>
+<li>Limit + rest remainder ≈ GTC/DAY without session end.</li>
+<li>Market + cancel residual ≈ <strong>IOC market</strong>.</li>
+<li>True FOK = extra pre-check: enough opposite liquidity at acceptable prices before any fill.</li>
+</ul>
+<p>“IOC is a TIF; market is a type. A limit IOC is common: take what you can up to limit, cancel rest.”</p>
+<hr />
+<h2 id="special-advanced-types-do-not-build-name-fluently">Special / advanced types (do not build; name fluently)</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Type</th>
+<th>Idea</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Stop / stop-limit</strong></td>
+<td>Becomes market/limit when trigger trades</td>
+</tr>
+<tr class="even">
+<td><strong>Iceberg / reserve</strong></td>
+<td>Display qty &lt;&lt; total; replenish</td>
+</tr>
+<tr class="odd">
+<td><strong>Pegged</strong></td>
+<td>Price floats with NBBO/mid</td>
+</tr>
+<tr class="even">
+<td><strong>Midpoint / dark</strong></td>
+<td>Non-displayed, mid execution</td>
+</tr>
+<tr class="odd">
+<td><strong>Post-only</strong></td>
+<td>Reject if it would take; maker-only</td>
+</tr>
+<tr class="even">
+<td><strong>Reduce-only</strong></td>
+<td>Derivatives: only shrink position</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="side-conventions">Side conventions</h2>
+<ul>
+<li><strong>Buy / Bid:</strong> willing to purchase; rests on <strong>bid</strong> book.</li>
+<li><strong>Sell / Ask / Offer:</strong> willing to sell; rests on <strong>ask</strong> book.</li>
+</ul>
+<p>Aggressive buy hits asks; aggressive sell hits bids.</p>
+<hr />
+<h2 id="quantity-semantics">Quantity semantics</h2>
+<ul>
+<li>Incoming qty must be <code>&gt; 0</code>.</li>
+<li>On each trade of size <code>q</code>, <strong>both</strong> maker remaining and taker remaining decrease by <code>q</code>.</li>
+<li>When remaining hits 0, order is <strong>fully filled</strong> and removed (no cancel event required beyond trades — optional “Filled” event is nice-to-have, not required).</li>
+</ul>
+<p><strong>Partial fill:</strong> trade qty <code>&lt;</code> order remaining before the trade.</p>
+<hr />
+<h2 id="cancel">Cancel</h2>
+<ul>
+<li><strong>Full cancel (v1):</strong> remove remaining qty of a resting order by id.</li>
+<li>Cancel of unknown id / already gone → <strong>reject</strong> (book unchanged).</li>
+<li>Cancel during matching of <em>another</em> order doesn’t apply — single-threaded sequential messages.</li>
+</ul>
+<p><strong>Amend / replace (out of scope):</strong> change price or qty. Real venues often implement as atomic cancel+replace with queue-priority rules (lose time priority if price changes; sometimes keep if qty down only). v1 users: cancel + new.</p>
+<hr />
+<h2 id="self-trade">Self-trade</h2>
+<p>When the same logical owner would be both maker and taker:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Policy</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Allow</td>
+<td>Match as normal (our <strong>v1</strong>)</td>
+</tr>
+<tr class="even">
+<td>Cancel newest</td>
+<td>Kill aggressor (or resting) per STP mode</td>
+</tr>
+<tr class="odd">
+<td>Cancel oldest</td>
+<td>Prefer keeping new liquidity</td>
+</tr>
+<tr class="even">
+<td>Decrement / adjust</td>
+<td>More exotic</td>
+</tr>
+</tbody>
+</table>
+<p>Allowing self-trades keeps tests simple; mention STP as a one-line future flag.</p>
+<hr />
+<h2 id="rejects-validation-layer">Rejects (validation layer)</h2>
+<p>Typical reject reasons to support in v1:</p>
+<ul>
+<li><code>qty &lt;= 0</code></li>
+<li>duplicate <code>order_id</code></li>
+<li>cancel unknown id</li>
+<li>(optional) invalid price for limit (e.g. non-positive if you forbid it)</li>
+<li>(optional) market order with non-zero price ignored or rejected — <strong>pick one, document</strong></li>
+</ul>
+<p>Rejects must leave the book <strong>unchanged</strong>.</p>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>When does a buy limit rest vs aggress?</li>
+<li>How does our market residual policy differ from FOK?</li>
+<li>Why is amend out of scope yet still easy to demo via cancel+new?</li>
+<li>Name three TIFs and map IOC to our market behaviour.</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="Theory_Market_Microstructure.html">← 01 Microstructure</a>
+    <span class="spacer"></span>
+    <a href="Theory_Limit_Order_Book.html">03 Limit order book →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

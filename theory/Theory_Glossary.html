@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glossary</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html" class="active">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Reference</span></div>
+<h1 id="glossary">Glossary</h1>
+<table>
+<colgroup>
+<col style="width: 40%" />
+<col style="width: 60%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Aggressor / taker</strong></td>
+<td>Incoming order that trades immediately against resting liquidity</td>
+</tr>
+<tr class="even">
+<td><strong>Ask / offer</strong></td>
+<td>Sell side; resting sell limits</td>
+</tr>
+<tr class="odd">
+<td><strong>BBO</strong></td>
+<td>Best bid and offer (best bid + best ask)</td>
+</tr>
+<tr class="even">
+<td><strong>Bid</strong></td>
+<td>Buy side; resting buy limits</td>
+</tr>
+<tr class="odd">
+<td><strong>CLOB</strong></td>
+<td>Continuous limit order book</td>
+</tr>
+<tr class="even">
+<td><strong>Crossed book</strong></td>
+<td>Best bid ≥ best ask — invalid post-state for our engine</td>
+</tr>
+<tr class="odd">
+<td><strong>Depth</strong></td>
+<td>Liquidity available at successive price levels</td>
+</tr>
+<tr class="even">
+<td><strong>FIFO</strong></td>
+<td>First-in first-out within a price level (time priority)</td>
+</tr>
+<tr class="odd">
+<td><strong>Fill</strong></td>
+<td>Execution / trade against an order</td>
+</tr>
+<tr class="even">
+<td><strong>FOK</strong></td>
+<td>Fill-or-kill: full qty now or reject, no partials</td>
+</tr>
+<tr class="odd">
+<td><strong>GTC / DAY</strong></td>
+<td>Rest until cancel / until session end</td>
+</tr>
+<tr class="even">
+<td><strong>Iceberg</strong></td>
+<td>Shows partial size; refreshes display qty</td>
+</tr>
+<tr class="odd">
+<td><strong>IOC</strong></td>
+<td>Immediate-or-cancel: match now, cancel remainder</td>
+</tr>
+<tr class="even">
+<td><strong>L1 / L2 / L3</strong></td>
+<td>Top of book / aggregated depth / full order-by-order book</td>
+</tr>
+<tr class="odd">
+<td><strong>Level</strong></td>
+<td>All resting orders at one price</td>
+</tr>
+<tr class="even">
+<td><strong>Limit order</strong></td>
+<td>Cap (floor) on buy (sell) price; may rest</td>
+</tr>
+<tr class="odd">
+<td><strong>Liquidity</strong></td>
+<td>Resting size available to trade against</td>
+</tr>
+<tr class="even">
+<td><strong>Locked market</strong></td>
+<td>Best bid == best ask</td>
+</tr>
+<tr class="odd">
+<td><strong>Lot</strong></td>
+<td>Quantity quantum</td>
+</tr>
+<tr class="even">
+<td><strong>Maker</strong></td>
+<td>Resting party to a trade</td>
+</tr>
+<tr class="odd">
+<td><strong>Market order</strong></td>
+<td>Take liquidity now; no rest price</td>
+</tr>
+<tr class="even">
+<td><strong>Marketable</strong></td>
+<td>Limit that can trade immediately given BBO</td>
+</tr>
+<tr class="odd">
+<td><strong>Matching engine</strong></td>
+<td>Component that applies priority rules and emits trades</td>
+</tr>
+<tr class="even">
+<td><strong>Midprice</strong></td>
+<td>Average of best bid and best ask</td>
+</tr>
+<tr class="odd">
+<td><strong>NBBO</strong></td>
+<td>National best bid/offer (US equities consolidated)</td>
+</tr>
+<tr class="even">
+<td><strong>Order book</strong></td>
+<td>Data structure of resting orders</td>
+</tr>
+<tr class="odd">
+<td><strong>Partial fill</strong></td>
+<td>Trade for less than order’s remaining qty</td>
+</tr>
+<tr class="even">
+<td><strong>Post-only</strong></td>
+<td>Accept only if order rests (maker); reject if it would take</td>
+</tr>
+<tr class="odd">
+<td><strong>Price priority</strong></td>
+<td>Better prices match before worse</td>
+</tr>
+<tr class="even">
+<td><strong>Price-time priority</strong></td>
+<td>Price first, then arrival time</td>
+</tr>
+<tr class="odd">
+<td><strong>Pro-rata</strong></td>
+<td>Same-price allocation by size share (not our v1)</td>
+</tr>
+<tr class="even">
+<td><strong>Resting</strong></td>
+<td>Live on the book awaiting fill/cancel</td>
+</tr>
+<tr class="odd">
+<td><strong>Spread</strong></td>
+<td>Best ask − best bid</td>
+</tr>
+<tr class="even">
+<td><strong>STP</strong></td>
+<td>Self-trade prevention</td>
+</tr>
+<tr class="odd">
+<td><strong>Sweep / walk the book</strong></td>
+<td>Aggressor consumes multiple price levels</td>
+</tr>
+<tr class="even">
+<td><strong>Tick</strong></td>
+<td>Minimum price increment; we store integer ticks</td>
+</tr>
+<tr class="odd">
+<td><strong>TIF</strong></td>
+<td>Time-in-force</td>
+</tr>
+<tr class="even">
+<td><strong>Time priority</strong></td>
+<td>Earlier resting orders at a price trade first</td>
+</tr>
+<tr class="odd">
+<td><strong>Trade / execution</strong></td>
+<td>Matched qty at a price between maker and taker</td>
+</tr>
+</tbody>
+</table>
+<h2 id="symbols-used-in-notes">Symbols used in notes</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Symbol</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>L</code></td>
+<td>Number of distinct price levels on a side</td>
+</tr>
+<tr class="even">
+<td><code>k</code></td>
+<td>Orders at one price level</td>
+</tr>
+<tr class="odd">
+<td><code>T</code></td>
+<td>Trades produced by one inbound message</td>
+</tr>
+<tr class="even">
+<td><code>D</code></td>
+<td>Snapshot depth requested</td>
+</tr>
+</tbody>
+</table>
+
+    </article>
+  <nav class="pager">
+    <a href="Theory_Design_Decisions.html">← Design decisions</a>
+    <span class="spacer"></span>
+    <span></span>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

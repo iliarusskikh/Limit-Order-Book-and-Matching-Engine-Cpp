@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>05 — Data Structures & Complexity</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html" class="active">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Systems</span></div>
+<h1 id="data-structures-complexity">05 — Data Structures &amp; Complexity</h1>
+<h2 id="design-goal-for-v1">Design goal for v1</h2>
+<p><strong>Correct and obvious</strong> — not nanosecond optimal.</p>
+<p>Default choice (locked for this project):</p>
+<pre class="text"><code>bids: map&lt;price, deque&lt;Order&gt;, greater&lt;price&gt;&gt;   // best bid = begin()
+asks: map&lt;price, deque&lt;Order&gt;&gt;                   // best ask = begin()
+index: unordered_map&lt;order_id, OrderRef&gt;         // cancel / locate</code></pre>
+<p><code>OrderRef</code> can store side + price (re-find deque) or iterators (faster, more fragile on invalidation — prefer side+price+careful erase for v1).</p>
+<hr />
+<h2 id="why-stdmap-for-prices">Why <code>std::map</code> for prices?</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Sorted; <code>begin()</code> is best price</td>
+<td>O(log L) per level touch; node allocs</td>
+</tr>
+<tr class="even">
+<td>Exact semantics; easy erase of empty levels</td>
+<td>Cache-unfriendly</td>
+</tr>
+<tr class="odd">
+<td>Clear teaching/review story</td>
+<td>Not HFT-grade</td>
+</tr>
+</tbody>
+</table>
+<p><code>L</code> = number of <strong>distinct prices</strong> with liquidity (often small vs number of orders).</p>
+<hr />
+<h2 id="why-stddeque-for-fifo">Why <code>std::deque</code> for FIFO?</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>O(1) push_back / pop_front</td>
+<td>Middle cancel is O(k) in deque</td>
+</tr>
+<tr class="even">
+<td>Stable enough for teaching</td>
+<td>Contiguous chunks; iterator invalidation rules</td>
+</tr>
+</tbody>
+</table>
+<p>Cancel-in-middle: linear scan in the level’s deque is OK for v1 if levels aren’t huge; document it. Intrusive doubly-linked list per level fixes O(1) cancel — classic upgrade path.</p>
+<hr />
+<h2 id="complexity-cheat-sheet-v1">Complexity cheat sheet (v1)</h2>
+<p>Let <code>L</code> = price levels on a side, <code>k</code> = orders at a level, <code>T</code> = trades emitted by one submit, <code>D</code> = snapshot depth.</p>
+<table>
+<colgroup>
+<col style="width: 40%" />
+<col style="width: 59%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Operation</th>
+<th>Typical cost</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Rest new limit at price</td>
+<td>O(log L) map + O(1) push</td>
+</tr>
+<tr class="even">
+<td>Cancel by id</td>
+<td>O(1) index + O(k) find in deque + O(log L) erase level if empty</td>
+</tr>
+<tr class="odd">
+<td>Match one level fully</td>
+<td>O(k) pops</td>
+</tr>
+<tr class="even">
+<td>Aggressive submit</td>
+<td>O(T + log L per level touched)</td>
+</tr>
+<tr class="odd">
+<td>L2 snapshot depth D</td>
+<td>O(D) walking map iterators</td>
+</tr>
+</tbody>
+</table>
+<p>Emphasize: <strong>correctness first</strong>; cite these bounds in README.</p>
+<hr />
+<h2 id="alternatives-know-dont-build-yet">Alternatives (know, don’t build yet)</h2>
+<h3 id="flat-array-price-indexed-buckets">1. Flat array / price-indexed buckets</h3>
+<p>Map tick → level via <code>index = price - min_price</code>. O(1) best if you track best pointers. Needs bounded price range; re-centering on moves. Used in latency-sensitive books.</p>
+<h3 id="intrusive-lists-level-pool">2. Intrusive lists + level pool</h3>
+<p>Orders are nodes; levels pooled; custom allocators. Excellent cancel and cache control. More code, more bugs — <strong>post-v1</strong>.</p>
+<h3 id="stdmultiset-of-orders-with-comparator-price-time">3. <code>std::multiset</code> of orders with comparator (price, time)</h3>
+<p>One container per side. Simpler mentally, weaker “level aggregate” updates, awkward L2 aggregation. Usually worse than map+queue.</p>
+<h3 id="skip-lists-btree">4. Skip lists / btree</h3>
+<p>Production adjacent; unnecessary for portfolio v1.</p>
+<hr />
+<h2 id="memory-allocation-awareness">Memory &amp; allocation awareness</h2>
+<p>Each <code>map</code> node and <code>deque</code> block heap-allocates. For a portfolio engine:</p>
+<ul>
+<li>Optional later: count allocations with a custom <code>operator new</code> — not in v1.</li>
+<li>Do not introduce a custom pool until the book is correct.</li>
+</ul>
+<p>review: “I’d preallocate order nodes and recycle them; hot path should avoid <code>unordered_map</code> rehash and <code>map</code> thrash under cancel storms.”</p>
+<hr />
+<h2 id="index-design-detail">Index design detail</h2>
+<pre class="text"><code>struct BookLocation {
+  Side side;
+  int64_t price;
+  // optional: generation / seq to detect stale refs
+};
+
+unordered_map&lt;uint64_t, BookLocation&gt; by_id;</code></pre>
+<p>On fully fill or cancel: erase from <code>by_id</code>.<br />
+On partial fill: location unchanged (same price level).</p>
+<p><strong>Never</strong> store raw <code>deque::iterator</code> across operations unless you are meticulous about invalidation — easy footgun.</p>
+<hr />
+<h2 id="snapshot-implementation-tip">Snapshot implementation tip</h2>
+<pre class="text"><code>vector&lt;BookLevel&gt; OrderBook::bids(size_t depth) const {
+  vector&lt;BookLevel&gt; out;
+  for (auto it = bids_.begin(); it != bids_.end() &amp;&amp; out.size() &lt; depth; ++it)
+    out.push_back({it-&gt;first, sum_qty(it-&gt;second), it-&gt;second.size()});
+  return out;
+}</code></pre>
+<p>Keep <code>sum_qty</code> either maintained incrementally (better) or scanned (simpler, fine for small k). <strong>Incremental aggregates</strong> are the better v1 habit: update on insert/trade/cancel.</p>
+<hr />
+<h2 id="concurrency-theory-only">Concurrency (theory only)</h2>
+<p>Production patterns:</p>
+<ul>
+<li><strong>Single-threaded book</strong> per symbol shard; gateway pins symbol → thread.</li>
+<li>Mutex per book (simple, limited).</li>
+<li>Disruptor / SPSC queues into matching thread.</li>
+<li>Lock-free books — research/expert territory; easy to get wrong.</li>
+</ul>
+<p>v1: <strong>one thread</strong>, no locks. Say so in README — shows scope taste.</p>
+<hr />
+<h2 id="what-to-say-in-review-30-seconds">Thirty-second summary</h2>
+<blockquote>
+<p>“I used a <code>map</code> from price to a <code>deque</code> of orders for clear price-time semantics, plus a hash index for cancels. Best bid/ask are <code>begin()</code> on inverted/ascending maps. It’s O(log L) per level — fine for correctness. For latency I’d move to pooled levels, intrusive queues, and a contiguous price ladder with cached BBO.”</p>
+</blockquote>
+<p>That paragraph <em>is</em> the portfolio win.</p>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>Give Big-O for cancel-by-id in our design.</li>
+<li>Why avoid storing deque iterators in the id index?</li>
+<li>Name one upgrade that makes mid-level cancel O(1).</li>
+<li>When is a flat tick array better than <code>std::map</code>?</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="Theory_Matching_And_Priority.html">← 04 Matching & priority</a>
+    <span class="spacer"></span>
+    <a href="Theory_Events_And_Invariants.html">06 Events & invariants →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

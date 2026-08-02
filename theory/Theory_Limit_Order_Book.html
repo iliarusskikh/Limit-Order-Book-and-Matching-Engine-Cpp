@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>03 — The Limit Order Book</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+    <a class="brand" href="index.html">LOB Theory</a>
+    <div class="brand-sub">Notes for this matching engine</div>
+    <div class="nav-label">Contents</div>
+    <nav>
+    <a href="index.html">Index</a>
+    <a href="Theory_Architecture.html">Architecture</a>
+    <a href="Theory_Market_Microstructure.html">Market microstructure</a>
+    <a href="Theory_Order_Types_And_TIF.html">Order types & TIF</a>
+    <a href="Theory_Limit_Order_Book.html" class="active">Limit order book</a>
+    <a href="Theory_Matching_And_Priority.html">Matching & priority</a>
+    <a href="Theory_Data_Structures.html">Data structures</a>
+    <a href="Theory_Events_And_Invariants.html">Events & invariants</a>
+    <a href="Theory_Systems_Cpp.html">Systems C++</a>
+    <a href="Theory_Testing_And_Correctness.html">Testing</a>
+    <a href="Theory_Design_Decisions.html">Design decisions</a>
+    <a href="Theory_Glossary.html">Glossary</a>
+    </nav>
+  </aside>
+  <main>
+    <article>
+<div class="note-meta"><span class="tag">Book</span></div>
+<h1 id="the-limit-order-book">03 — The Limit Order Book</h1>
+<h2 id="book-as-a-sorted-catalogue-of-intent">Book as a sorted catalogue of intent</h2>
+<p>A <strong>limit order book (LOB)</strong> stores resting orders:</p>
+<ul>
+<li><strong>Bids:</strong> buy limits, sorted <strong>descending</strong> by price (best = highest).</li>
+<li><strong>Asks:</strong> sell limits, sorted <strong>ascending</strong> by price (best = lowest).</li>
+</ul>
+<p>Within one <strong>price level</strong>, orders form a <strong>queue</strong> (arrival order for price-time priority).</p>
+<pre class="text"><code>        BIDS (desc)              ASKS (asc)
+   price  qty  (FIFO queue)   price  qty  (FIFO queue)
+   100 ←─ 30  [A, B]          101 ←─ 20  [C]
+    99 ←─ 50  [D]             102 ←─ 40  [E, F]
+    98 ←─ 10  [G]             103 ←─ 15  [H]
+
+   best bid = 100             best ask = 101
+   spread = 1 tick</code></pre>
+<hr />
+<h2 id="l1-l2-l3-depth">L1 / L2 / L3 depth</h2>
+<table>
+<colgroup>
+<col style="width: 23%" />
+<col style="width: 33%" />
+<col style="width: 43%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Level</th>
+<th>Contents</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>L1</strong></td>
+<td>Best bid/ask price + size (sometimes just BBO)</td>
+<td>Quotes, simple UIs</td>
+</tr>
+<tr class="even">
+<td><strong>L2</strong></td>
+<td>Top <em>N</em> levels: price → <strong>aggregated</strong> size (± order count)</td>
+<td>Depth views, impact estimates</td>
+</tr>
+<tr class="odd">
+<td><strong>L3</strong></td>
+<td>Every order id at every price (full book)</td>
+<td>Reconstruction, surveillance</td>
+</tr>
+</tbody>
+</table>
+<p>Our API exposes <strong>L2 snapshots</strong> (<code>bids(depth)</code>, <code>asks(depth)</code>). Internally we store enough for L3 (individual orders) because matching needs FIFO queues.</p>
+<hr />
+<h2 id="resting-vs-aggressing">Resting vs aggressing</h2>
+<ul>
+<li><strong>Resting (passive):</strong> on the book, waiting.</li>
+<li><strong>Aggressing (active / taking):</strong> incoming order that matches immediately.</li>
+</ul>
+<p>An incoming limit can be <strong>both</strong>: take some liquidity, then rest the remainder (<strong>partial take + book</strong>). That path is mandatory golden-test material.</p>
+<hr />
+<h2 id="price-levels-vs-orders">Price levels vs orders</h2>
+<p>Two layers:</p>
+<ol type="1">
+<li><strong>Price level:</strong> key = price; value = aggregate metadata + queue of orders.</li>
+<li><strong>Order:</strong> id, remaining qty, side, …</li>
+</ol>
+<p>Operations:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Op</th>
+<th>Level effect</th>
+<th>Queue effect</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>New rest</td>
+<td>Create level if needed; add qty</td>
+<td>Push back</td>
+</tr>
+<tr class="even">
+<td>Trade vs head</td>
+<td>Decrease aggregate</td>
+<td>Decrease head qty or pop</td>
+</tr>
+<tr class="odd">
+<td>Cancel middle</td>
+<td>Decrease aggregate; drop empty level</td>
+<td>Erase that node</td>
+</tr>
+<tr class="even">
+<td>Level empty</td>
+<td>Erase price key</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="aggregation-for-snapshots">Aggregation for snapshots</h2>
+<p>For L2 level at price <code>p</code>:</p>
+<pre class="formula">total_qty(p)    = sum of remaining_qty over orders at price p
+order_count(p)  = number of orders at price p</pre>
+<p>Snapshot of depth <code>N</code>: first <code>N</code> keys in bid/ask sort order.</p>
+<p>Empty book → empty vectors; one-sided book is normal.</p>
+<hr />
+<h2 id="crossing-and-why-matching-must-drain-it">Crossing and why matching must drain it</h2>
+<p>If someone submits a buy limit at 105 while best ask is 101, the book would <strong>cross</strong> if you rested blindly. Correct engine:</p>
+<ol type="1">
+<li>Match 105-buy against asks at 101, 102, … while <code>ask_price ≤ 105</code> and qty remains.</li>
+<li>Only then rest residual on the bid at 105 (if any).</li>
+<li>Post-condition: not crossed.</li>
+</ol>
+<p><strong>Rule of thumb:</strong> never insert a resting order that would cross; matching first is mandatory.</p>
+<hr />
+<h2 id="book-of-one-instrument">Book of one instrument</h2>
+<p>v1: one <code>OrderBook</code> inside one <code>MatchingEngine</code>.</p>
+<p>Multi-symbol production sketch:</p>
+<pre class="text"><code>unordered_map&lt;SymbolId, OrderBook&gt; books;
+// gateway routes by symbol; each book single-threaded or shard-owned</code></pre>
+<p>Sharding and concurrency are <strong>ops/architecture</strong>, not day-1 matching logic.</p>
+<hr />
+<h2 id="display-vs-matchable-liquidity">Display vs matchable liquidity</h2>
+<p>On real exchanges, displayed size may differ from matchable (icebergs, odd lots, retail segments). Our book: <strong>all resting qty is displayed and matchable</strong>.</p>
+<hr />
+<h2 id="state-you-must-track-beyond-the-two-maps">State you must track beyond the two maps</h2>
+<table>
+<colgroup>
+<col style="width: 55%" />
+<col style="width: 45%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Structure</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>id → (side, price, …)</code> index</td>
+<td>O(log n) / O(1) cancel without scanning whole book</td>
+</tr>
+<tr class="even">
+<td>Monotonic seq (optional)</td>
+<td>Explicit FIFO tie-break if you don’t trust deque order alone</td>
+</tr>
+<tr class="odd">
+<td>Event buffer</td>
+<td>Return trades/acks from <code>submit</code></td>
+</tr>
+</tbody>
+</table>
+<p>Cancel <strong>without</strong> an id index forces linear scan — unacceptable even in a teaching engine once N grows. <strong>Plan includes an order index.</strong></p>
+<hr />
+<h2 id="visual-after-a-partial-fill">Visual: after a partial fill</h2>
+<p>Before: bid <code>10@100</code> (id1). Incoming sell limit <code>4@100</code>.</p>
+<ul>
+<li>Trade: 4 @ 100 (maker id1, taker id2).</li>
+<li>Residual: bid <code>6@100</code> still id1 at head of 100-queue.</li>
+</ul>
+<p>After: same price level, smaller head order — FIFO position of id1 <strong>unchanged</strong>.</p>
+<hr />
+<div class="self-check"><h2 id="self-check">Self-check</h2>
+<ol type="1">
+<li>Draw L2 for a book with two bid levels and one ask level.</li>
+<li>Why does matching need L3 detail while clients often get L2?</li>
+<li>What breaks if you rest a marketable limit without matching first?</li>
+<li>Why keep an <code>order_id → location</code> index?</li>
+</ol>
+</div>
+    </article>
+  <nav class="pager">
+    <a href="Theory_Order_Types_And_TIF.html">← 02 Order types & TIF</a>
+    <span class="spacer"></span>
+    <a href="Theory_Matching_And_Priority.html">04 Matching & priority →</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>
