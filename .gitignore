@@ -44,3 +44,7 @@ xcuserdata/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local / editor debris
+*.user
+*.orig
