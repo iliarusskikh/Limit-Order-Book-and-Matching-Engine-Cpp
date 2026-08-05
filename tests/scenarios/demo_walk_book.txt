@@ -1,0 +1,14 @@
+# =============================================================================
+# demo_walk_book.txt
+# Purpose: Readable demo — post a spread, sweep the ask, snapshot, cancel.
+# Not a gate for G1–G9; used by README / CLI walkthrough.
+# =============================================================================
+
+NEW 1 BUY LIMIT 10 100
+NEW 2 SELL LIMIT 10 105
+SNAPSHOT 5
+NEW 3 BUY LIMIT 15 105
+SNAPSHOT 5
+CANCEL 1
+SNAPSHOT 5
+CHECK_NO_CROSS

@@ -1,0 +1,12 @@
+# =============================================================================
+# g9_rejects.txt
+# Purpose: Bad qty and duplicate id are rejected; resting liquidity unchanged.
+# Expect: best bid still 10@100 after the two rejected NEWs.
+# =============================================================================
+
+NEW 1 BUY LIMIT 10 100
+NEW 2 BUY LIMIT 0 100
+NEW 1 SELL LIMIT 5 101
+SNAPSHOT 5
+CHECK_BEST_BID 100 10
+CHECK_NO_CROSS

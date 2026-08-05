@@ -1,0 +1,13 @@
+# =============================================================================
+# g7_market_thin.txt
+# Purpose: Market buy vs thin asks — walk prices, cancel unfilled residual.
+# Expect: trades 10@101 + 20@102; CANCEL residual 70; book empty; 2 trades.
+# Market price field is 0 (ignored).
+# =============================================================================
+
+NEW 1 SELL LIMIT 10 101
+NEW 2 SELL LIMIT 20 102
+NEW 3 BUY MARKET 100 0
+SNAPSHOT 5
+CHECK_TRADE_COUNT 2
+CHECK_NO_CROSS

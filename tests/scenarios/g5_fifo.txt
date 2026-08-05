@@ -1,0 +1,13 @@
+# =============================================================================
+# g5_fifo.txt
+# Purpose: Same price → time priority (FIFO); older resting order fills first.
+# Expect: buy 5 consumes id1 (3) then id2 (2); ask residual 8@100; 2 trades.
+# =============================================================================
+
+NEW 1 SELL LIMIT 3 100
+NEW 2 SELL LIMIT 10 100
+NEW 3 BUY LIMIT 5 100
+SNAPSHOT 5
+CHECK_BEST_ASK 100 8
+CHECK_TRADE_COUNT 2
+CHECK_NO_CROSS

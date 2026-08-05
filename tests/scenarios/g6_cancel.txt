@@ -1,0 +1,11 @@
+# =============================================================================
+# g6_cancel.txt
+# Purpose: User cancel removes resting order; cancel again / unknown id reject.
+# Note: CHECK_BEST_BID 0 0 means expect no meaningful best bid after cancel.
+# =============================================================================
+
+NEW 1 BUY LIMIT 10 100
+CANCEL 1
+CHECK_BEST_BID 0 0
+CANCEL 1
+CANCEL 99

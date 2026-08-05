@@ -1,0 +1,12 @@
+# =============================================================================
+# g3_partial_fill.txt
+# Purpose: Aggressor smaller than resting size → partial fill; maker residual rests.
+# Expect: trade 4@100; best bid residual 6@100; taker does not rest.
+# =============================================================================
+
+NEW 1 BUY LIMIT 10 100
+NEW 2 SELL LIMIT 4 100
+SNAPSHOT 5
+CHECK_BEST_BID 100 6
+CHECK_TRADE_COUNT 1
+CHECK_NO_CROSS

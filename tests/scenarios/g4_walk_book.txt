@@ -1,0 +1,14 @@
+# =============================================================================
+# g4_walk_book.txt
+# Purpose: Large buy walks multiple ask prices (price priority).
+# Expect: trades at 101, 102, then partial 103; residual ask 5@103; 3 trades.
+# =============================================================================
+
+NEW 1 SELL LIMIT 10 101
+NEW 2 SELL LIMIT 10 102
+NEW 3 SELL LIMIT 10 103
+NEW 4 BUY LIMIT 25 103
+SNAPSHOT 5
+CHECK_BEST_ASK 103 5
+CHECK_TRADE_COUNT 3
+CHECK_NO_CROSS

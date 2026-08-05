@@ -1,0 +1,11 @@
+# =============================================================================
+# g2_exact_fill.txt
+# Purpose: Sell limit exactly matches resting buy; one trade at maker price.
+# Expect: TRADE 10@100 (maker=1); book empty after; one trade total.
+# =============================================================================
+
+NEW 1 BUY LIMIT 10 100
+NEW 2 SELL LIMIT 10 100
+SNAPSHOT 5
+CHECK_TRADE_COUNT 1
+CHECK_NO_CROSS

@@ -1,0 +1,11 @@
+# =============================================================================
+# g8_no_cross.txt
+# Purpose: Aggressive buy through the ask must match, not rest and cross.
+# Expect: buy @105 vs ask @101 trades; book remains uncrossed.
+# =============================================================================
+
+NEW 1 SELL LIMIT 10 101
+NEW 2 BUY LIMIT 5 100
+NEW 3 BUY LIMIT 10 105
+CHECK_NO_CROSS
+SNAPSHOT 5

@@ -1,0 +1,12 @@
+# =============================================================================
+# g1_rest_only.txt
+# Purpose: Non-marketable limits rest on opposite sides of an uncrossed book.
+# Expect: best bid 10@100, best ask 10@101; CHECK_NO_CROSS passes.
+# =============================================================================
+
+NEW 1 BUY LIMIT 10 100
+NEW 2 SELL LIMIT 10 101
+SNAPSHOT 5
+CHECK_BEST_BID 100 10
+CHECK_BEST_ASK 101 10
+CHECK_NO_CROSS
