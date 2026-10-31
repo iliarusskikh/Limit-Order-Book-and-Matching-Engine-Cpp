@@ -129,6 +129,7 @@ inline ScenarioResult run_scenario(std::istream& in, std::ostream& out = std::co
     if (interactive) {
       std::cerr << "> " << std::flush;
     }
+    // block until we get a line
     if (!std::getline(in, line)) {
       break;  // EOF (Ctrl-D) or stream end
     }
